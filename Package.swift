@@ -15,6 +15,6 @@ let package = Package(
         .binaryTarget(
             name: "SipisProvider",
             url: "https://dist.acrobits.net/saas/sipis-provider-swift-package/release/SipisProvider.xcframework-173726.zip",
-            checksum: "eb462e41a8c4aeba2fd1cb889b17156722397b15346ba007ea313dba4086b14a"),
+            checksum: "a9fb1984684b7f54b56cde4bfb52f293f3c3b3a3b39623a32016bdc790dd780d"),
     ]
 )
