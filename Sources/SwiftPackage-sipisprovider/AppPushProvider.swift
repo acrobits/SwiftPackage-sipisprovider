@@ -21,17 +21,20 @@ import NetworkExtension
  * or set the `icm` property of an account to `localPush`
  */
 
-class AppPushProvider: NEAppPushProvider {
+@objc(AppPushProvider)
+public class AppPushProvider: NEAppPushProvider {
         
-    var _sipis: LocalSipis?;
+    public var _sipis: LocalSipis?
+    public var _log: NSLogSerializer? = NSLogSerializer(prefix: "AppPushProvider")
 
-    override init() {
+    public override init() {
         super.init()
         
         _sipis = LocalSipis(notificationHandler: SipisNotificationHandler(witProvider: self))
+        _sipis?.setCustomSink(_log)
     }
     
-    override func start(completionHandler: @escaping (Error?) -> Void)
+    public override func start(completionHandler: @escaping (Error?) -> Void)
     {
         NSLog("AppPushProvider:    starting network extension (%@)", self);
         DispatchQueue.main.async { [self] in
@@ -39,6 +42,8 @@ class AppPushProvider: NEAppPushProvider {
             let basePath = sharedPath(filename: nil)!       // shared directory path
             let key : Data? = sharedKey();                  // it should be a random 16 bytes encryption key (preferably stored in the keychain)
             
+            let postDataArray:[String]? = self.providerConfiguration?["postData"] as! [String]?;
+
             let strSettings = """
                 
                 <Sipis>
@@ -61,9 +66,9 @@ class AppPushProvider: NEAppPushProvider {
                         RsaPrivateKeyFileName=""/>
                     -->
                   </TlsClientCertificates>
-                  <Instance UserAgent="Testing SIPIS">
-                    <MaxAge Minutes="15"/>
-                    <PremiumMaxAge Minutes="15"/>
+                  <Instance UserAgent="Local Push">
+                    <MaxAge Days="365"/>
+                    <PremiumMaxAge Days="365"/>
                     <NotRegisteredMaxAge Minutes="3"/>
                     <KeepAlivePackets Enabled="Yes">
                        <Period Seconds="60"/>
@@ -94,60 +99,72 @@ class AppPushProvider: NEAppPushProvider {
                   </IncomingTextMessage>
                 </Sipis>
                 """
-            _sipis?.start(withSettings: strSettings, basePath: basePath, key: key)
-    
-            NSLog("AppPushProvider:    starting local sipis finished");
-            completionHandler(nil);
+
+            _sipis?.start(withSettings: strSettings, basePath: basePath, key: key, completionHandler: { (error: Error?) -> Void in
+                postDataArray?.forEach({ postData in
+                    self._sipis?.registerAccount(withPostData: postData, encrypted: key?.count ?? 0 > 0)
+                })
+                NSLog("AppPushProvider:    starting local sipis finished");
+                completionHandler(error)
+            })
         }
         
     }
 
-    override func stop(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+    public override func stop(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         DispatchQueue.main.async { [self] in
-            _sipis?.stop()
-            completionHandler();
+            let option : StopOptionType = StopOption_ForgetInstances
+            
+//            switch reason {
+//            case .providerDisabled,
+//                    .configurationFailed,
+//                    .configurationDisabled,
+//                    .configurationRemoved,
+//                    .superceded
+//                :
+//                option = StopOption_ForgetInstances
+//            default:
+//                option = StopOption_RememberInstances
+//            }
+            _sipis?.stop(with:option, completionHandler: completionHandler)
         }
     }
     
+    public override func handleTimerEvent() {
+        DispatchQueue.main.async { [self] in
+            _sipis?.timerEvent()
+        }
+    }
     
     /*
      helper function to get the shared app group ID from the app's Info.plist SHARED_APP_GROUP_ID
      and builing a path to the shared directory
      */
-    func sharedPath(filename: String?) -> String?
+    public func sharedPath(filename: String?) -> String?
     {
-        var bundle = Bundle.main
+        let shareGroupIdentifier = Bundle.sharedAppGroupId();
         
-        if bundle.bundleURL.pathExtension == "appex"
+        if shareGroupIdentifier == nil
         {
-            // Peel off two directory levels - MY_APP.app/PlugIns/MY_APP_EXTENSION.appex
-            bundle = Bundle(url: bundle.bundleURL.deletingLastPathComponent().deletingLastPathComponent())!
-
-            let shareGroupIdentifier = bundle.object(forInfoDictionaryKey: "SHARED_APP_GROUP_ID")
-            
-            if shareGroupIdentifier == nil {
-                return nil
-            }
-        
-            let appGroupFolderUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: shareGroupIdentifier! as! String)
-        
-            if appGroupFolderUrl == nil
-            {
-                return nil
-            }
-            
-            if filename == nil
-            {
-                return appGroupFolderUrl!.path
-            } else
-            {
-                return appGroupFolderUrl!.appendingPathComponent(filename!).path
-            }
+            return nil
         }
-        return nil
+        let appGroupFolderUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: shareGroupIdentifier!)
+        
+        if appGroupFolderUrl == nil
+        {
+            return nil
+        }
+        
+        if filename == nil
+        {
+            return appGroupFolderUrl!.path
+        } else
+        {
+            return appGroupFolderUrl!.appendingPathComponent(filename!).path
+        }
     }
     
-    func sharedKey() -> Data?
+    public func sharedKey() -> Data?
     {
         let keychainItemQuery = [
             kSecClass: kSecClassGenericPassword,
